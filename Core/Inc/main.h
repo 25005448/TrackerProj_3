@@ -69,11 +69,18 @@ void Error_Handler(void);
 #define GSM_PWX_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
+//GPS defines
 #define RX_BUFFER_SIZE_GPS 200
 #define gps_Test "$PMTK000*32\r\n"
-#define HIGH_UPDATE_RATE "$PMTK220,1000*1F\r\n"
+#define HIGH_UPDATE_RATE "$PMTK220,2000*1C\r\n"
 #define LOW_UPDATE_RATE "$PMTK220,10000*2F\r\n"
-#define gps_FullPower "$PMTK225,0*2B"
+#define gps_FullPower "$PMTK225,0*2B\r\n"
+//
+
+
+
+
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
