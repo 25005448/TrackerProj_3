@@ -51,6 +51,13 @@ typedef enum{
 	GpsError,
 	GpsReady
 }GpsStatus;
+
+enum{ //Mode state of system
+	Mode1 =1,//Geo-fence
+	Mode2,   //Timed update mode
+	Mode3,	//On Request
+	Mode4 //Standby
+};
 /* USER CODE END EM */
 
 /* Exported functions prototypes ---------------------------------------------*/
@@ -63,6 +70,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define User_Button___KEY_Pin GPIO_PIN_0
 #define User_Button___KEY_GPIO_Port GPIOA
+#define DTR_Pin GPIO_PIN_4
+#define DTR_GPIO_Port GPIOA
 #define GPS_RST_Pin GPIO_PIN_8
 #define GPS_RST_GPIO_Port GPIOA
 #define GSM_PWX_Pin GPIO_PIN_9
@@ -73,8 +82,14 @@ void Error_Handler(void);
 #define RX_BUFFER_SIZE_GPS 200
 #define gps_Test "$PMTK000*32\r\n"
 #define HIGH_UPDATE_RATE "$PMTK220,2000*1C\r\n"
+#define VERYHIGH_UPDATE_RATE "$PMTK220,1000*1F\r\n"
 #define LOW_UPDATE_RATE "$PMTK220,10000*2F\r\n"
 #define gps_FullPower "$PMTK225,0*2B\r\n"
+//
+
+//GSM defines
+
+
 //
 
 

@@ -1,0 +1,8 @@
+../Core/Src/gsm.c:43:5:gsm_init	8	static
+../Core/Src/gsm.c:82:5:gsm_sendCommand	40	static
+../Core/Src/gsm.c:155:5:gsm_sendSMS	128	static
+../Core/Src/gsm.c:174:5:gsm_getIndex	16	static
+../Core/Src/gsm.c:184:6:gsm_readSMS	72	static
+../Core/Src/gsm.c:257:6:processMode	88	static
+../Core/Src/gsm.c:358:6:gsm_sendLocation	160	static
+../Core/Src/gsm.c:411:5:gsm_batteryCheck	24	static
