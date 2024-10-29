@@ -74,10 +74,9 @@ extern  bool _is_gps_data_good;
 //internal
 uint8_t gsm_sleepFlag = 0;
 uint8_t gsm_sleepReturnFlag = 0;
-char *phone = "+27649032433";
+char phone[20];
 extern char RX_Buffer_GSM[RX_BUFFER_SIZE_GSM];
 uint8_t gsm_TimerCounter = 0;
-
 //external
 extern uint8_t newMessageFlag;
 
@@ -98,6 +97,7 @@ uint32_t updatePeriod = 10*60*1000; //10 minutes
 
 //Debug Variables//**********************
 extern uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
+uint32_t messageTIM = 0;
 //uint32_t TTFF = 0;
 
 //***************************************
@@ -159,6 +159,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
 
 			if(result != NULL){ //check for a new message notification
 			 newMessageFlag = 1;
+			 messageTIM = HAL_GetTick();
 			}
 			HAL_UARTEx_ReceiveToIdle_DMA(&huart2,(uint8_t*)RX_Buffer_GSM, RX_BUFFER_SIZE_GSM);
 		}
@@ -166,6 +167,9 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
 
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //GPS 10 minute status check
+
+
+	if(newMessageFlag == 0){
 
 	if(htim->Instance == TIM2){//GPS maintenance
 		char output[] = "GPS Status Check:\r\n";
@@ -188,7 +192,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //GPS 10 minute sta
 
 	if(htim->Instance == TIM3){//GSM maintenance
 
-		if((gsm_TimerCounter == 4)&&(newMessageFlag == 0)){ //Set to be called every 2.5 minutes
+		if(gsm_TimerCounter == 4){ //Set to be called every 2.5 minutes
 			gsm_TimerCounter = 0;
 		char output[] = "GSM Status Check:\r\n";
 		CDC_Transmit_FS((uint8_t *)output, strlen(output));
@@ -197,7 +201,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //GPS 10 minute sta
 				HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, 0);//Wake up SIM800C
 				gsm_sleepFlag = 0;
 				gsm_sleepReturnFlag = 1;
-				HAL_Delay(60);
+				HAL_Delay(250);
 			}
 
 			if(gsm_init() == GsmError){//Check if startup failed then therefore device is off (Evaluates proper running and if not resets device)
@@ -218,6 +222,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //GPS 10 minute sta
 			gsm_TimerCounter++;
 		}
 
+	}
 	}
 
 }
@@ -280,6 +285,7 @@ int main(void)
   GPS_timer= HAL_GetTick();
 
   //gsm_sendSMS("Hello World");
+  snprintf(phone,strlen(MY_PHONE)+1,"%s",MY_PHONE);
 
   float latitude = 0;
   float longitude = 0;
@@ -317,24 +323,26 @@ int main(void)
 		  if(newMessageFlag == 1){ //Handle new message received
 			  if(gsm_sleepFlag == 1){//Ensure module is awake
 			  		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, 0);//Wake up SIM800C
-			  		HAL_Delay(60);
+			  		HAL_Delay(250);
 			  		gsm_sleepFlag = 0;
 			  		gsm_sleepReturnFlag = 1;
 			  		}
 
 			  gsm_readSMS();
 			  gsm_sendCommand(ClearMemory,"OK\r\n");
-			  newMessageFlag = 0;
 
 			  if(gsm_sleepReturnFlag == 1){
 				  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, 1);//SIm800C Sleep
 				  gsm_sleepFlag = 1;
 				  gsm_sleepReturnFlag = 0;
 			  }
+
+			  newMessageFlag = 0;
 		  }
 
 		  if(sendCoordinateFlag == 1){ //Send location pin to user (uses most recent 'good' location data.
-		  		  gsm_sendLocation(latitude, longitude);
+			  	  gsm_sendLocation(latitude, longitude);
+			  	  CDC_Transmit_FS((uint8_t *)Location_Sent,strlen(Location_Sent) );
 		  		  sendCoordinateFlag = 0;
 		  	  }
 
@@ -349,25 +357,27 @@ int main(void)
 		   switch(currentModeState){
 
 		   	   case(Mode1):
-				 if(((gps_distance_between(latitude, longitude, geoFenceLat, geoFenceLong) - geoFenceSize) > 0) && ((longitude != 0) || (latitude != 0))){
+
+				 if(newModeFlag == 1){//Set new mode parameters
+					 gsm_sendSMS("Mode 1 Set");
+				   	 gsm_sendCommand("AT+CSCLK=1\r\n","OK\r\n");
+				   	 HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, 1);//set sleep mode
+				   	 gps_updateMode(3,1000,3000); //Period
+					 CDC_Transmit_FS((uint8_t*)"GPS IDLE & GSM SLEEP SET\r\n",26);
+				   	 gsm_sleepFlag = 1;
+				   	 gps_sleepFlag = 1;
+				   	 newModeFlag = 0;
+				 }
+
+				if(((gps_distance_between(latitude, longitude, geoFenceLat, geoFenceLong) - geoFenceSize) > 0) && ((longitude != 0) || (latitude != 0))){
 					 HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, 0);//Wake up SIM800C
-					 HAL_Delay(60);
+					 HAL_Delay(250);
 					 gsm_sleepFlag = 0;
 					 gsm_sendSMS("GEO-Fence breached!\r\n");
 					 gsm_sendLocation(latitude, longitude);
 					 mode_update(Mode2,5,0,0);
 				 }
-		   	   	   currentModeState = Mode1;
-
-		   	   	 if(newModeFlag == 1){//Set new mode parameters
-		   	   		 gsm_sendSMS("Mode 1 Set");
-		   	   		 gsm_sendCommand("AT+CSCLK=1\r\n","OK\r\n");
-		   	   		 HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, 1);//set sleep mode
-		   	   		 gps_updateMode(3,1000,3000); //Period
-		   	   		 gsm_sleepFlag = 1;
-		   	   		 gps_sleepFlag = 1;
-		   	   		 newModeFlag = 0;
-	  		}
+		   	   	   //currentModeState = Mode1;
 
 		   	   	 break;
 
@@ -395,11 +405,12 @@ int main(void)
 		   		   gsm_sendCommand("AT+CSCLK=1\r\n","OK\r\n");
 		   		   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, 1);//set sleep mode
 		   		   gps_updateMode(3,1000,3000); //Period
+		   		   CDC_Transmit_FS((uint8_t*)"GPS IDLE & GSM SLEEP SET\r\n",26);
 		   		   gsm_sleepFlag = 1;
 		   		   gps_sleepFlag = 1;
 		   		   newModeFlag = 0;
 		   	   }
-		   	   currentModeState = Mode2;
+		   	   //currentModeState = Mode2;
 
 		   	   break;
 
@@ -407,11 +418,13 @@ int main(void)
 	  			  currentModeState = Mode3;
 
 		   	   if(newModeFlag == 1){
+		   		   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, 0);//turn off sleep mode
+		   		   HAL_Delay(250);
+		   		   gsm_sendCommand("AT+CSCLK=0","OK");
+		   		   HAL_Delay(100);
 		   		   gsm_sendSMS("Mode 3 Set");
 		   		   gps_updateMode(1,0,0); //Period
-		   		   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, 0);//turn off sleep mode
 		   		   HAL_Delay(100);
-		   		   gsm_sendCommand("AT+CSCLK=0","OK");
 		   		   newModeFlag = 0;
 		   		   gsm_sleepFlag = 0;
 		   		   gps_sleepFlag = 0;
@@ -423,6 +436,8 @@ int main(void)
 					currentModeState = Mode4;
 
 		   	   if(newModeFlag == 1){
+		   		   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, 0);//Wake up SIM800C
+		   		   HAL_Delay(250);
 		   		   gsm_sendSMS("Mode 4 Set");
 		   		   gps_updateMode(2,0,0);
 		   		   gsm_sendCommand("AT+CSCLK=1\r\n","OK\r\n");
@@ -459,6 +474,7 @@ int main(void)
 		 	  else if(UserRxBufferFS[0] == '4'){
 		 		  uint8_t rmcCommand[] = "$PMTK161,0*28\r\n"; //enable sleep mode only
 		 		  	gps_command(rmcCommand, "PMTK001,161,3");
+		 		  	gps_sleepFlag = 1;
 		 		  memset(UserRxBufferFS,'\0',strlen((char *)UserRxBufferFS));
 		 	  }
 
@@ -468,7 +484,44 @@ int main(void)
 		 			 }
 
 		 	else if(UserRxBufferFS[0] == '6'){
-		 		        gps_command((uint8_t *) LOW_UPDATE_RATE, "PMTK001,220,3");
+		 		char url[100];
+		 				gsm_sendCommand("AT+SAPBR=3,1,\"Contype\",\"GPRS\"\r\n","OK\r\n");
+		 				gsm_sendCommand("AT+SAPBR=3,1,\"APN\",\"CMNET\"\r\n","OK\r\n");
+		 				gsm_sendCommand("AT+SAPBR=1,1\r\n","OK\r\n");
+		 				if (gsm_sendCommand("AT+SAPBR=2,1\r\n","OK\r\n") == Gsmok){ //Network connection secured?
+		 				gsm_sendCommand("AT+CLBSCFG=0,1\r\n","OK\r\n");
+		 				gsm_sendCommand("AT+CLBSCFG=0,2\r\n","OK\r\n");
+		 				gsm_sendCommand("AT+CLBSCFG=1,3,\"lbs-simcom.com:3002\"\r\n","OK\r\n");
+		 				HAL_Delay(100);
+
+		 				if (gsm_sendCommand("AT+CLBS=1,1\r\n","OK\r\n") == Gsmok){ //Location returned?
+		 				//char *token = NULL;
+		 					char *messageCopy = NULL;
+		 					size_t length = strlen(RX_Buffer_GSM);
+		 					char *token1 = NULL;
+		 					char *token2 = NULL;
+
+
+		 					messageCopy = (char *)malloc(length);
+		 					strncpy(messageCopy, RX_Buffer_GSM, length);
+		 					messageCopy[length + 1 ] = '\0';
+		 					memset(RX_Buffer_GSM,'\0', length); //clear
+		 					token1 = strtok(messageCopy, ","); //function splits up the string.
+		 					token1 = strtok(NULL, ","); //longitude
+		 					token2 = strtok(NULL, ","); //latitude
+		 					free(messageCopy);
+		 					snprintf(url, sizeof(url),"LBS: Latitude:%s, Longitude:%s",token2,token1);
+		 					CDC_Transmit_FS((uint8_t*) url, strlen(url));
+		 				}
+
+		 				else{
+		 					//snprintf(url, sizeof(url),"No Location Available"); //Send if Network location fails
+
+		 					}
+		 				//gsm_sendSMS(url);
+		 			}
+		 				gsm_sendCommand("AT+SAPBR=0,1\r\n","OK\r\n");
+
 		 			 	memset(UserRxBufferFS,'\0',strlen((char *)UserRxBufferFS));
 		 			 }
 		 	else if(UserRxBufferFS[0] == '7'){
@@ -485,7 +538,6 @@ int main(void)
 		 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, 0);
 		 			HAL_Delay(2000);
 		 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, 1);
-		 			HAL_Delay(2000);
 		 			memset(UserRxBufferFS,'\0',strlen((char *)UserRxBufferFS));
 		 	}
 
@@ -807,7 +859,7 @@ void gps_init(){
 			}
 	//TTFF = HAL_GetTick();
 
-	gps_command((uint8_t *) gps_FullPower, "PMTK001,225,0,3");//Returns a different message
+	//gps_command((uint8_t *) gps_FullPower, "PMTK001,225,0,3");//Returns a different message
 
 	HAL_Delay(200);
 
@@ -844,7 +896,7 @@ int gps_command(uint8_t *cmd, char *response) //Send Commands to GPS and check r
     	Failed = strstr(RX_BufferGPS, ",0*");
 
 
-    	if((HAL_GetTick() - GPS_timer2) > 3000){ //3s time-out error
+    	if((HAL_GetTick() - GPS_timer2) > 2000){ //2s time-out error
     		memset(RX_BufferGPS, 0, RX_BUFFER_SIZE_GPS);
     		CDC_Transmit_FS((uint8_t *)"Time Out Error\r\n", 15); //debug terminal
     		HAL_UARTEx_ReceiveToIdle_DMA(&huart1,(uint8_t *) RX_BufferGPS, RX_BUFFER_SIZE_GPS);
@@ -871,6 +923,7 @@ void gps_updateMode(uint8_t mode,uint16_t on, uint16_t off){ // implement mode c
 	switch(mode){
 	case(1): //Full power continuous mode
 	        gps_command((uint8_t *)gps_Test,"PMTK001,0,3");
+			gps_command((uint8_t *)gps_FullPower, "PMTK001,220,3");
 	        HAL_Delay(1000);
 			gps_command((uint8_t *)LOW_UPDATE_RATE, "PMTK001,220,3");
 			break;
@@ -919,7 +972,7 @@ void mode_update(uint8_t newMode, float param1, float param2, float param3){
 	if(newMode == Mode1){ //update Mode parameters
 		geoFenceLat = param1;
 		geoFenceLong = param2;
-		geoFenceSize = param3 + 6; //added tolerance in m
+		geoFenceSize = param3 + 10; //added tolerance in m
 
 		if(currentModeState != Mode1){//If not currently in mode switch to new mode.
 			currentModeState = Mode1;

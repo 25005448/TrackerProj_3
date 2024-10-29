@@ -88,9 +88,12 @@ void Error_Handler(void);
 //
 
 //GSM defines
-
+#define MY_PHONE "+27649032433"
 
 //
+
+//Debug outputs
+#define Location_Sent "Location Request Sent\r\n"
 
 
 

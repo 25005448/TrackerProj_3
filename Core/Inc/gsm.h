@@ -17,6 +17,7 @@
 #define  setBaudRate "AT+IPR=115200\r\n"
 #define	 keepSetting "AT&W\r\n"
 #define  ClearMemory "AT+CMGD=1,2\r\n"
+#define	 Num_UPDATE "Number updated\r\n"
 
 //IP Network AT commands
 #define  SetAPN         "AT+SAPBR=3,1,\"APN\",\"www.safaricom.com\"\r\n"

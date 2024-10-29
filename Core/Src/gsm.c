@@ -32,11 +32,12 @@ char RX_Buffer_GSM[RX_BUFFER_SIZE_GSM];
 
 //External Variables//********************
 extern char RX_Buffer_GSM[RX_BUFFER_SIZE_GSM];
-extern char *phone;
+extern char phone[20];
 extern uint8_t gsm_sleepFlag;
 extern UART_HandleTypeDef huart2;
 extern uint8_t sendCoordinateFlag;
 extern uint32_t GPS_timer;
+extern uint32_t messageTIM;
 //****************************************
 
 
@@ -57,7 +58,7 @@ int gsm_init(){
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, 1);
 			HAL_Delay(2000);
 	}
-		gsm_sendCommand("AT+CSCLK=0","OK");
+		//gsm_sendCommand("AT+CSCLK=0","OK");
 		gsm_sendCommand(setBaudRate, "OK\r\n");
 		gsm_sendCommand(EnableMessageNotification, "OK\r\n" ); //enable SMS message notifications
 		gsm_sendCommand(SmsAlphabet,"OK\r\n");
@@ -67,7 +68,7 @@ int gsm_init(){
 	}
 
 	else{
-	gsm_sendCommand("AT+CSCLK=0","OK");
+	//gsm_sendCommand("AT+CSCLK=0","OK");
 	gsm_sendCommand(setBaudRate, "OK\r\n");
 	gsm_sendCommand(EnableMessageNotification, "OK\r\n" ); //enable SMS message notifications
 	gsm_sendCommand(SmsAlphabet,"OK\r\n");
@@ -93,6 +94,12 @@ int gsm_sendCommand(char *Command,char *response) //Sends command via UART and c
 	HAL_UART_Transmit_DMA(&huart2,(uint8_t*)Command,strlen(Command)); //transmit command
 
 	timer2 = HAL_GetTick();
+	uint16_t time_out = 7000;
+
+	if(sendMessageFlag == 1){
+		time_out = 10000;
+	}
+
 	while(*P!=response[0])	//Waits 7 second for response therefor delays are not needed
 	{
 		P=strstr(RX_Buffer_GSM,response); //What is the message returned type?
@@ -106,16 +113,21 @@ int gsm_sendCommand(char *Command,char *response) //Sends command via UART and c
 			if(newMessageFlag == 0){
 				memset(RX_Buffer_GSM,'\0',strlen(RX_Buffer_GSM));
 			}
-		    CDC_Transmit_FS((uint8_t *)"Error\r\n", 8); //debug terminal
+		    CDC_Transmit_FS((uint8_t *)"Error\r\n", 7); //debug terminal
 			HAL_UARTEx_ReceiveToIdle_DMA(&huart2,(uint8_t*)RX_Buffer_GSM, RX_BUFFER_SIZE_GSM);
 			return GsmError;
 		}
 
-		if(HAL_GetTick() - timer2 > 7000){ //7s time-out error
+		if(HAL_GetTick() - timer2 > time_out){ //7s time-out error
 			if(newMessageFlag == 0){
 			memset(RX_Buffer_GSM,'\0',strlen(RX_Buffer_GSM));
 			}
+			if(sendMessageFlag == 0){
 			CDC_Transmit_FS((uint8_t *)"Time Out Error\r\n", 15); //debug terminal
+			}
+			else if(sendMessageFlag != 0){
+			CDC_Transmit_FS((uint8_t *)response, strlen(response)); //debug terminal
+			}
 			HAL_UARTEx_ReceiveToIdle_DMA(&huart2,(uint8_t*)RX_Buffer_GSM, RX_BUFFER_SIZE_GSM);
 			return GsmError;
 		}
@@ -154,12 +166,15 @@ int gsm_sendCommand(char *Command,char *response) //Sends command via UART and c
 
 int gsm_sendSMS(char *Message){ //Send an SMS to a chosen phone number
     char SetPara[100] = {0};
+    char output[200] = {0};
 
     snprintf(SetPara, sizeof(SetPara), "AT+CMGS=\"%s\"\r\n", phone);
     gsm_sendCommand(SmsTextMode, "OK\r\n");
-    gsm_sendCommand(SetPara, ">");  // Start SMS sending
     sendMessageFlag = 1;
-    gsm_sendCommand(Message, ">");  // Send the SMS message content
+    gsm_sendCommand(SetPara, ">");  // Start SMS sending
+    messageTIM = HAL_GetTick() - messageTIM;
+    snprintf(output, strlen(Message) + 30,"%s, Response Time = %lu ms", Message, messageTIM);
+    gsm_sendCommand(output, ">");  // Send the SMS message content
 
     char ch[1] = {0};
     int n = 26;
@@ -167,6 +182,9 @@ int gsm_sendSMS(char *Message){ //Send an SMS to a chosen phone number
     ch[1] = '\r';
 
     gsm_sendCommand(ch, "OK\r\n"); // send <CTRL + Z>
+    sendMessageFlag = 0;
+
+    CDC_Transmit_FS((uint8_t*)output, strlen(output));
     return Gsmok;
 }
 
@@ -174,10 +192,24 @@ int gsm_sendSMS(char *Message){ //Send an SMS to a chosen phone number
 int gsm_getIndex() //get the index of the new stored sms message
 	{
 	char *cmti = strstr(RX_Buffer_GSM, "+CMTI: \"SM\",");
-	int sms_index = atoi(cmti + strlen("+CMTI: \"SM\","));
+	int sms_index = 0;
+
+	if(cmti != NULL){ //SIM card memory
+		cmti += strlen("+CMTI: \"SM\",");
+		sms_index = atoi(cmti);
+	}
+
+	else if(cmti == NULL){ //phone book memory
+		cmti = strstr(RX_Buffer_GSM, "+CMTI: \"ME\",");
+		if(cmti != NULL){
+			cmti += strlen("+CMTI: \"ME\",");
+			sms_index = atoi(cmti);
+		}
+	}
+
 	memset(RX_Buffer_GSM,'\0',strlen(RX_Buffer_GSM)); //clear buffer
 	readMessageFlag = 1;
-	return(sms_index);
+	return sms_index;
 }
 
 
@@ -190,6 +222,9 @@ void gsm_readSMS() //extract and copy message into a buffer -> Categories messag
 	HAL_UARTEx_ReceiveToIdle_DMA(&huart2,(uint8_t*)RX_Buffer_GSM, RX_BUFFER_SIZE_GSM);
 
 	sprintf(readCommand, "AT+CMGR=%d\r\n", smsIndex); //read the message stored at the index
+
+
+
 
 	if(gsm_sendCommand(readCommand, "OK\r\n" ) == GsmMessage){			//Extract and copy message contents
 
@@ -212,8 +247,11 @@ void gsm_readSMS() //extract and copy message into a buffer -> Categories messag
 		}
 	}
 	newMessageFlag = 0;
-	memset(RX_Buffer_GSM,'\0', strlen(RX_Buffer_GSM)); //clear buff
-	CDC_Transmit_FS((uint8_t*) messageCopy, strlen(messageCopy));
+
+	char output2[100] = {0};
+	snprintf(output2, strlen(messageCopy)+ 2,"%s\n",messageCopy);
+
+	CDC_Transmit_FS((uint8_t*) output2, strlen(output2));
 
 	char *mode = NULL;
 	char *req = NULL;
@@ -224,10 +262,12 @@ void gsm_readSMS() //extract and copy message into a buffer -> Categories messag
 	number = strstr(messageCopy, "NN");
 
 	if(mode != NULL){
+		memset(RX_Buffer_GSM,'\0', strlen(RX_Buffer_GSM)); //clear buff
 		processMode(messageCopy);
 	}
 
 	else if(req != NULL){
+		 memset(RX_Buffer_GSM,'\0', strlen(RX_Buffer_GSM)); //clear buff
 		 sendCoordinateFlag = 1;
 	}
 
@@ -239,13 +279,17 @@ void gsm_readSMS() //extract and copy message into a buffer -> Categories messag
 			if(code != NULL){ //Check for correct Code
 				char *token;
 				token = strtok(RX_Buffer_GSM, ","); //function splits up the string.
-				token = strtok(NULL, ",");
-				token = strtok(NULL, ",");
-				*phone = *token;
+				token = strtok(NULL, "+");
+				token = strtok(NULL, "\"");
+
+				snprintf(phone,strlen(token)+2,"+%s",token);
+				memset(RX_Buffer_GSM,'\0', strlen(RX_Buffer_GSM)); //clear buff
 				gsm_sendSMS("Phone number updated"); //Send an SMS to a chosen phone number
+				CDC_Transmit_FS((uint8_t *)Num_UPDATE, 17);
 			}
 	}
 	else{
+		memset(RX_Buffer_GSM,'\0', strlen(RX_Buffer_GSM)); //clear buff
 		gsm_sendSMS("Command not recognized!");
 	}
 
@@ -286,12 +330,12 @@ void processMode(char *messageContents){
 		}
 
 		else if(term == 2){
-				gsmParam1 = token;
+				gsmParam2 = token;
 				term++;
 		}
 
 		else if(term == 3){
-				gsmParam1 = token;
+				gsmParam3 = token;
 				term++;
 		}
 		token = strtok(NULL, ",");
@@ -313,20 +357,20 @@ void processMode(char *messageContents){
 			unsigned long fixAgeGPS;
 
 			gps_f_get_position(&gsmParam1_int,&gsmParam2_int,&fixAgeGPS);
-			gsmParam3_int = strtol(gsmParam3, NULL, 10);//radius
+			gsmParam3_int = strtol(gsmParam2, NULL, 10);//radius
 		}
 
 		else{//Manually set coordinates
 
-			if((strlen(gsmParam1) > 8)&&(strlen(gsmParam1) < 11)){
-				gsmParam1_int = strtol(gsmParam1, NULL, 10);//latitude
+			if((strlen(gsmParam1) >= 8)&&(strlen(gsmParam1) <= 11)){
+				gsmParam1_int = strtof(gsmParam1, NULL);//latitude
 			}
 			else{
 				gsmParam1_int = 0;
 			}
 
-			if((strlen(gsmParam2)>8)&&(strlen(gsmParam2) < 11)){
-				gsmParam2_int = strtol(gsmParam2, NULL, 10);//longitude
+			if((strlen(gsmParam2)>=8)&&(strlen(gsmParam2) < 11)){
+				gsmParam2_int = strtof(gsmParam2, NULL);//longitude
 			}
 			else{
 				gsmParam2_int = 0;
@@ -384,7 +428,7 @@ void gsm_sendLocation(float lat, float longa){
 			token1 = strtok(NULL, ","); //longitude
 			token2 = strtok(NULL, ","); //latitude
 			free(messageCopy);
-			snprintf(url, sizeof(url),"Estimated GSM Location: https://www.google.com/maps?q=%s,%s\r\n",token2,token1);
+			snprintf(url, sizeof(url),"LBS Location: https://www.google.com/maps?q=%s,%s\r\n",token2,token1);
 		}
 
 		else{
